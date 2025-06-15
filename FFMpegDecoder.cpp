@@ -359,10 +359,10 @@ void FFMpegDecoder::audioDecodeLoop() {
   SwrContext *swr_ctx = nullptr;
 
   // 初始化 swr
-  swr_alloc();
+  swr_ctx = swr_alloc();
   av_opt_set_chlayout(swr_ctx, "in_chlayout", &actx->ch_layout, 0);
   av_opt_set_int(swr_ctx, "in_sample_rate", actx->sample_rate, 0);
-  av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", actx->sample_fmt,5);
+  av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", actx->sample_fmt,0);
 
   AVChannelLayout out_ch_layout;
   av_channel_layout_default(&out_ch_layout, OUT_CHANNELS);
