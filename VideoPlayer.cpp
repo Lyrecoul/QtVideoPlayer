@@ -205,9 +205,8 @@ void VideoPlayer::play(const QString &path) {
       }
       if (aid_idx >= 0) {
         AVCodecParameters *apar = fmt_ctx->streams[aid_idx]->codecpar;
-        videoInfoLabel += QString("音频: %1Hz %2ch  ")
-                              .arg(apar->sample_rate)
-                              .arg(apar->channels);
+        videoInfoLabel += QString("音频: %1Hz  ")
+                              .arg(apar->sample_rate);
       }
       if (fmt_ctx->duration > 0) {
         int sec = fmt_ctx->duration / AV_TIME_BASE;

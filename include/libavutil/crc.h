@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "attributes.h"
-#include "version.h"
 
 /**
  * @defgroup lavu_crc32 CRC
@@ -53,11 +52,8 @@ typedef enum {
     AV_CRC_32_IEEE,
     AV_CRC_32_IEEE_LE,  /*< reversed bitorder version of AV_CRC_32_IEEE */
     AV_CRC_16_ANSI_LE,  /*< reversed bitorder version of AV_CRC_16_ANSI */
-#if FF_API_CRC_BIG_TABLE
-    AV_CRC_24_IEEE = 12,
-#else
     AV_CRC_24_IEEE,
-#endif /* FF_API_CRC_BIG_TABLE */
+    AV_CRC_8_EBU,
     AV_CRC_MAX,         /*< Not part of public API! Do not use outside libavutil. */
 }AVCRCId;
 
@@ -88,7 +84,10 @@ const AVCRC *av_crc_get_table(AVCRCId crc_id);
 
 /**
  * Calculate the CRC of a block.
+ * @param ctx initialized AVCRC array (see av_crc_init())
  * @param crc CRC of previous blocks if any or initial value for CRC
+ * @param buffer buffer whose CRC to calculate
+ * @param length length of the buffer
  * @return CRC updated with the data from the given block
  *
  * @see av_crc_init() "le" parameter

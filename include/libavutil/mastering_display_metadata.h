@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (c) 2016 Neil Birkbeck <neil.birkbeck@gmail.com>
  *
  * This file is part of FFmpeg.
@@ -76,6 +76,15 @@ typedef struct AVMasteringDisplayMetadata {
  *         on failure.
  */
 AVMasteringDisplayMetadata *av_mastering_display_metadata_alloc(void);
+
+/**
+ * Allocate an AVMasteringDisplayMetadata structure and set its fields to
+ * default values. The resulting struct can be freed using av_freep().
+ *
+ * @return An AVMasteringDisplayMetadata filled with default values or NULL
+ *         on failure.
+ */
+AVMasteringDisplayMetadata *av_mastering_display_metadata_alloc_size(size_t *size);
 
 /**
  * Allocate a complete AVMasteringDisplayMetadata and add it to the frame.

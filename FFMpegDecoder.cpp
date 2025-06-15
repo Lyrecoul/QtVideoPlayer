@@ -17,7 +17,7 @@ static const int OUT_CHANNELS = 2;
 static const AVSampleFormat OUT_SAMPLE_FMT = AV_SAMPLE_FMT_S16;
 
 FFMpegDecoder::FFMpegDecoder(QObject *parent) : QObject(parent) {
-  av_register_all();
+  avformat_network_init();
 }
 
 FFMpegDecoder::~FFMpegDecoder() { stop(); }
@@ -92,24 +92,13 @@ void FFMpegDecoder::videoDecodeLoop() {
     return;
   }
 
-  AVCodec *vcodec = nullptr;
-  AVCodec *iter = av_codec_next(nullptr);
-  while (iter) {
-    if (iter->id == fmt_ctx->streams[vid_idx]->codecpar->codec_id &&
-        iter->decode != nullptr && iter->type == AVMEDIA_TYPE_VIDEO) {
-      if (QString(iter->name).contains("rk", Qt::CaseInsensitive)) {
-        iter = av_codec_next(iter);
-        continue;
-      }
-      vcodec = iter;
-      break;
-    }
-    iter = av_codec_next(iter);
-  }
+
+
+  AVCodecParameters *vcodecpar = fmt_ctx->streams[vid_idx]->codecpar;
+  const AVCodec *vcodec = avcodec_find_decoder(vcodecpar->codec_id);
   if (!vcodec) {
-    qWarning() << "Video decoder not found";
-    avformat_close_input(&fmt_ctx);
-    return;
+      qWarning() << "Video decoder not found for codec id:" << vcodecpar->codec_id;
+      return;
   }
   AVCodecContext *vctx = avcodec_alloc_context3(vcodec);
   if (!vctx) {
@@ -341,24 +330,11 @@ void FFMpegDecoder::audioDecodeLoop() {
     return;
   }
 
-  AVCodec *acodec = nullptr;
-  AVCodec *iter = av_codec_next(nullptr);
-  while (iter) {
-    if (iter->id == fmt_ctx->streams[aid_idx]->codecpar->codec_id &&
-        iter->decode != nullptr && iter->type == AVMEDIA_TYPE_AUDIO) {
-      if (QString(iter->name).contains("rk", Qt::CaseInsensitive)) {
-        iter = av_codec_next(iter);
-        continue;
-      }
-      acodec = iter;
-      break;
-    }
-    iter = av_codec_next(iter);
-  }
+  AVCodecParameters *acodecpar = fmt_ctx->streams[aid_idx]->codecpar;
+  const AVCodec *acodec = avcodec_find_decoder(acodecpar->codec_id);
   if (!acodec) {
-    qWarning() << "Audio decoder not found";
-    avformat_close_input(&fmt_ctx);
-    return;
+      qWarning() << "Audio decoder not found for codec id:" << acodecpar->codec_id;
+      return;
   }
   AVCodecContext *actx = avcodec_alloc_context3(acodec);
   if (!actx) {
@@ -381,12 +357,22 @@ void FFMpegDecoder::audioDecodeLoop() {
   }
   AVRational atime_base = fmt_ctx->streams[aid_idx]->time_base;
   SwrContext *swr_ctx = nullptr;
-  if (actx->channel_layout == 0)
-    actx->channel_layout = av_get_default_channel_layout(actx->channels);
-  swr_ctx =
-      swr_alloc_set_opts(nullptr, av_get_default_channel_layout(OUT_CHANNELS),
-                         OUT_SAMPLE_FMT, OUT_SAMPLE_RATE, actx->channel_layout,
-                         actx->sample_fmt, actx->sample_rate, 0, nullptr);
+
+  // 初始化 swr
+  swr_alloc();
+  av_opt_set_chlayout(swr_ctx, "in_chlayout", &actx->ch_layout, 0);
+  av_opt_set_int(swr_ctx, "in_sample_rate", actx->sample_rate, 0);
+  av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", actx->sample_fmt,5);
+
+  AVChannelLayout out_ch_layout;
+  av_channel_layout_default(&out_ch_layout, OUT_CHANNELS);
+
+  av_opt_set_chlayout(swr_ctx, "out_chlayout", &out_ch_layout,0);
+  av_opt_set_int(swr_ctx,"out_sample_rate",OUT_SAMPLE_RATE,0);
+  av_opt_set_sample_fmt(swr_ctx,"out_sample_fmt",OUT_SAMPLE_FMT,0);
+
+  swr_init(swr_ctx);
+
   if (!swr_ctx || swr_init(swr_ctx) < 0) {
       qWarning() << "Failed to initialize audio resample context";
       swr_free(&swr_ctx);
@@ -484,53 +470,32 @@ void FFMpegDecoder::audioDecodeLoop() {
       m_audioClockMs.store(ms);
 
       // ----------- 修正同步基准 begin -----------
-      // 音频同步相关变量
-      static double audio_drift_threshold = 0.005;    // 允许的音频漂移阈值
-      static double audio_diff_avg_coef = 0.98;      // 音频差异平均系数
-      static double audio_diff_threshold = 0.03;     // 音频差异阈值 
-      static double audio_diff_avg = 0.0;           // 平均音频差异
-
-      // 修改音频同步逻辑
       if (first_audio_frame) {
           audio_playback_start_time = clock::now();
           first_audio_pts = ms;
           first_audio_frame = false;
       } else {
-          int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          // 计算理论应播放的时间长度（基于PTS）
+          int64_t expected_elapsed = ms - first_audio_pts;
+          
+          // 计算实际经过的时间
+          int64_t actual_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
               clock::now() - audio_playback_start_time).count();
 
-          // 计算实际差异（毫秒）
-          double diff = (ms - first_audio_pts) - elapsed;
+          // 计算偏差（毫秒）
+          int64_t diff = expected_elapsed - actual_elapsed;
 
-          // 更新平均差异
-          if (std::abs(diff) < 500) {  // 降低异常值过滤阈值
-              audio_diff_avg = audio_diff_avg * audio_diff_avg_coef + 
-                           diff * (1.0 - audio_diff_avg_coef);
-          }
+          // 动态调整阈值（更严格的同步控制）
+          double sync_threshold = std::max(10.0, std::min(expected_elapsed * 0.01, 30.0));
 
-          // 更严格的自适应阈值调整
-          double sync_threshold = std::max(5.0, std::min(audio_diff_threshold * elapsed * 0.001, 30.0));
-
-          // 基于平均差异和阈值的平滑同步
           if (std::abs(diff) > sync_threshold) {
               if (diff > 0) {
-                  // 播放过快，需要减速
-                  double delay = std::min(diff * 0.85, 40.0);  // 增加减速系数，降低最大延迟
-                  std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(delay)));
+                  // 音频比预期快，需要减速
+                  std::this_thread::sleep_for(std::chrono::milliseconds(diff));
               } else {
-                  // 播放过慢，轻微跳过
-                  if (diff < -200) {  // 提高跳帧门限
-                      continue;
-                  }
+                  // 音频比预期慢，跳过当前帧（仅当严重滞后时）
+                  if (diff < -100) continue;
               }
-          }
-
-          // 时钟漂移补偿
-          if (std::abs(audio_diff_avg) > audio_drift_threshold) {
-              // 增加时钟调整强度
-              auto adjustment = std::chrono::milliseconds(static_cast<int>(audio_diff_avg * 0.6));
-              audio_playback_start_time += adjustment;
-              audio_diff_avg *= 0.3;  // 保留一部分历史差异
           }
       }
       // ----------- 修正同步基准 end -------------

@@ -15,11 +15,5 @@ QMAKE_CXXFLAGS += -Wno-deprecated-declarations
 INCLUDEPATH += $$PWD/include/
 LIBS += -L$$PWD/libs/taglib -ltag \
         -L$$PWD/libs/libass -lass -lfribidi -lharfbuzz -lunibreak \
-        -L/home/lyrecoul/PenDevelopment/lib \
-        -lavformat -lavcodec -lavutil -lswscale -lswresample \
-        -lavdevice -lz -lasound -lavfilter \
-        -lfontconfig -lfreetype -lexpat -lpng16 -lglib-2.0 -lpcre2-8 \
-        -ldrm -lmali -lssl -lcrypto -lrockchip_mpp -lvorbisenc \
-        -lvorbis -lmp3lame -lavresample -lpcre -logg \
-        -ltheoradec -ltheoraenc -lm -ldl -lgbm -lwayland-client \
-        -lwayland-server -lffi
+        -L$$PWD/libs/ffmpeg -lavformat -lavcodec -lavutil -lswscale -lswresample \
+        -L/home/lyrecoul/PenDevelopment/lib/ -lfontconfig -lz -lpng16 -lexpat -lfreetype
