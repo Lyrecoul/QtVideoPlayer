@@ -15,5 +15,5 @@ QMAKE_CXXFLAGS += -Wno-deprecated-declarations
 INCLUDEPATH += $$PWD/include/
 LIBS += -L$$PWD/libs/taglib -ltag \
         -L$$PWD/libs/libass -lass -lfribidi -lharfbuzz -lunibreak \
-        -L$$PWD/libs/ffmpeg -lavformat -lavcodec -lavutil -lswscale -lswresample \
+        -L$$PWD/libs/ffmpeg-static -lavformat -lavcodec -lavutil -lswscale -lswresample \
         -L/home/lyrecoul/PenDevelopment/lib/ -lfontconfig -lz -lpng16 -lexpat -lfreetype
