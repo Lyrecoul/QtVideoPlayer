@@ -17,7 +17,6 @@ static const int OUT_CHANNELS = 2;
 static const AVSampleFormat OUT_SAMPLE_FMT = AV_SAMPLE_FMT_S16;
 
 FFMpegDecoder::FFMpegDecoder(QObject *parent) : QObject(parent) {
-  avformat_network_init();
 }
 
 FFMpegDecoder::~FFMpegDecoder() { stop(); }
