@@ -14,9 +14,10 @@ git lfs install
 git lfs pull
 ```
 
-2. 克隆 Qt 仓库以及 gcc 工具链
+2. 克隆 Qt 仓库、gcc 工具链以及词典笔 /usr/libs 文件夹
 
 ```shell
+git clone https://github.com/Lyrecoul/qt-5.15.2-for-aarch64-dictpen-linux.git
 git clone https://github.com/Lyrecoul/aarch64-dictpen-linux-gnu-gcc-toolchain.git
 git clone https://github.com/Lyrecoul/dictpen-libs.git
 ```
