@@ -2,14 +2,14 @@
 #include <QAction>
 #include <QAudioOutput>
 #include <QElapsedTimer>
-#include <QFileSystemWatcher> // 新增
+#include <QFileSystemWatcher>
 #include <QMap>
 #include <QMenu>
 #include <QPushButton>
 #include <QSharedPointer>
 #include <QTimer>
 #include <QWidget>
-#include <ass/ass.h> // 新增：libass 头文件
+#include <ass/ass.h>
 
 #include "FFMpegDecoder.h"
 #include "LyricRenderer.h"
@@ -101,10 +101,6 @@ private:
   // 新增：错误提示
   QString errorMessage;
   QTimer *errorShowTimer = nullptr;
-
-  // 新增：歌词渐变相关
-  qreal lyricOpacity = 1.0;
-  QElapsedTimer lyricFadeTimer;
 
   LyricManager *lyricManager;
   SubtitleManager *subtitleManager;

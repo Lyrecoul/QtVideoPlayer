@@ -58,7 +58,8 @@ VideoPlayer::VideoPlayer(QWidget *parent)
           [&](qint64 d) { duration = d; });
   connect(decoder, &FFMpegDecoder::positionChanged, this,
           &VideoPlayer::onPositionChanged);
-  // 新增：错误提示
+
+  // 错误提示
   errorShowTimer = new QTimer(this);
   errorShowTimer->setSingleShot(true);
   connect(errorShowTimer, &QTimer::timeout, this, [this]() {
@@ -72,7 +73,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
             scheduleUpdate();
           });
 
-  // 新增：顶部土司消息
+  // 顶部土司消息
   toastTimer = new QTimer(this);
   toastTimer->setSingleShot(true);
   connect(toastTimer, &QTimer::timeout, this, [this]() {
@@ -114,7 +115,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
   trackButtonTimer = new QElapsedTimer();
   trackButtonTimer->start();
 
-  // 帧率控制定时器 - 60fps (约 16.67ms)
+  // 帧率控制定时器 - 60fps (约 16.67 ms)
   frameRateTimer = new QTimer(this);
   frameRateTimer->setInterval(16); // ~60fps
   connect(frameRateTimer, &QTimer::timeout, this, [this]() {
@@ -123,32 +124,39 @@ VideoPlayer::VideoPlayer(QWidget *parent)
       QWidget::update();
     }
   });
-  frameRateTimer->start();
 
   // 文件名滚动
   scrollTimer = new QTimer(this);
-  scrollTimer->setInterval(80); // 降低到12.5fps，原来是25fps
+  scrollTimer->setInterval(80); // 降低到 12.5 fps，原来是 25 fps
   scrollPause = false;
   scrollPauseTimer = new QTimer(this);
   scrollPauseTimer->setSingleShot(true);
 
-  // 上次滚动更新时间
+  // 启动定时器 - 集中启动以提高代码清晰度
+  frameRateTimer->start();
+
+  // 重置状态变量
   lastScrollUpdateTime = 0;
+  updatePending = false;
 
   connect(scrollTimer, &QTimer::timeout, this, [this]() {
     if (scrollPause)
       return;
 
-    // 获取当前时间
-    qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
-
     // 增加滚动偏移
     scrollOffset += 2;
 
-    // 只有当显示覆盖栏时或者距离上次更新超 200ms 时才刷新界面
-    if (showOverlayBar || currentTime - lastScrollUpdateTime > 200) {
-      lastScrollUpdateTime = currentTime;
+    // 只在显示覆盖栏时才更新 UI，否则只在较长间隔时更新
+    if (showOverlayBar) {
       scheduleUpdate();
+    } else {
+      // 获取当前时间
+      qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+      // 限制更新频率（200ms间隔）
+      if (currentTime - lastScrollUpdateTime > 200) {
+        lastScrollUpdateTime = currentTime;
+        scheduleUpdate();
+      }
     }
   });
 
@@ -160,7 +168,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
 
   scrollOffset = 0;
 
-  // 新增：libass 初始化
+  // libass 初始化
   assLibrary = ass_library_init();
   if (assLibrary) {
     assRenderer = ass_renderer_init(assLibrary);
@@ -168,9 +176,8 @@ VideoPlayer::VideoPlayer(QWidget *parent)
       ass_set_fonts(assRenderer, nullptr, "Microsoft YaHei", 1, nullptr, 1);
     }
   }
-  // assTrack和hasAssSubtitle已由SubtitleManager管理
 
-  // 新增：屏幕状态文件监听
+  // 屏幕状态文件监听
   screenStatusWatcher = new QFileSystemWatcher(this);
   QString screenStatusPath = "/tmp/screen_status";
   QString screenStatusDir = QFileInfo(screenStatusPath).absolutePath();
@@ -256,23 +263,31 @@ VideoPlayer::VideoPlayer(QWidget *parent)
 }
 
 VideoPlayer::~VideoPlayer() {
-  decoder->stop();
-  audioOutput->stop();
-  scrollTimer->stop();
-  frameRateTimer->stop();
-
-  // 停止长按 2 倍速播放定时器
-  if (speedPressTimer) {
+  // 停止所有定时器
+  if (frameRateTimer)
+    frameRateTimer->stop();
+  if (scrollTimer)
+    scrollTimer->stop();
+  if (scrollPauseTimer)
+    scrollPauseTimer->stop();
+  if (speedPressTimer)
     speedPressTimer->stop();
-  }
-
-  // 停止土司定时器
-  if (toastTimer) {
+  if (toastTimer)
     toastTimer->stop();
-  }
+  if (errorShowTimer)
+    errorShowTimer->stop();
+  if (overlayTimer)
+    overlayTimer->stop();
+  if (overlayBarTimer)
+    overlayBarTimer->stop();
 
-  // 新增：libass 资源释放
-  // 由SubtitleManager自动管理ASS资源，无需手动释放assTrack/hasAssSubtitle
+  // 停止解码器和音频输出
+  if (decoder)
+    decoder->stop();
+  if (audioOutput)
+    audioOutput->stop();
+
+  // libass 资源释放 - 先释放渲染器，再释放库
   if (assRenderer) {
     ass_renderer_done(assRenderer);
     assRenderer = nullptr;
@@ -282,14 +297,15 @@ VideoPlayer::~VideoPlayer() {
     assLibrary = nullptr;
   }
 
-  // 关闭音频输出（使用 startDetached，避免不执行）
-  // QProcess::startDetached("ubus", QStringList() << "call" <<
-  // "eq_drc_process.output.rpc" << "control" << R"({"action":"Close"})");
-
+  // 释放对象资源 - 使用 nullptr 检查增加安全性
   delete lyricRenderer;
+  lyricRenderer = nullptr;
   delete subtitleRenderer;
+  subtitleRenderer = nullptr;
   delete lyricManager;
+  lyricManager = nullptr;
   delete subtitleManager;
+  subtitleManager = nullptr;
 }
 
 void VideoPlayer::play(const QString &path) {
@@ -301,7 +317,7 @@ void VideoPlayer::play(const QString &path) {
   lyricManager->loadLyrics(path);
   subtitleManager->reset();
 
-  // 新增：加载字幕（支持模糊匹配）
+  // 加载字幕（支持模糊匹配）
   QString basePath =
       QFileInfo(path).absolutePath() + "/" + QFileInfo(path).completeBaseName();
   QString assPath = basePath + ".ass";
@@ -321,42 +337,46 @@ void VideoPlayer::play(const QString &path) {
 
   // 读取视频/音频信息
   videoInfoLabel.clear();
-  AVFormatContext *fmt_ctx = nullptr;
-  if (avformat_open_input(&fmt_ctx, path.toUtf8().constData(), nullptr,
-                          nullptr) == 0) {
-    if (avformat_find_stream_info(fmt_ctx, nullptr) >= 0) {
-      int vid_idx = -1, aid_idx = -1;
-      for (unsigned i = 0; i < fmt_ctx->nb_streams; i++) {
-        AVCodecParameters *p = fmt_ctx->streams[i]->codecpar;
-        if (p->codec_type == AVMEDIA_TYPE_VIDEO && vid_idx < 0)
-          vid_idx = i;
-        if (p->codec_type == AVMEDIA_TYPE_AUDIO && aid_idx < 0)
-          aid_idx = i;
+
+  // 使用 FFmpeg API 直接读取媒体信息
+  {
+    AVFormatContext *fmt_ctx = nullptr;
+    if (avformat_open_input(&fmt_ctx, path.toUtf8().constData(), nullptr,
+                            nullptr) == 0) {
+      if (avformat_find_stream_info(fmt_ctx, nullptr) >= 0) {
+        int vid_idx = -1, aid_idx = -1;
+        for (unsigned i = 0; i < fmt_ctx->nb_streams; i++) {
+          AVCodecParameters *p = fmt_ctx->streams[i]->codecpar;
+          if (p->codec_type == AVMEDIA_TYPE_VIDEO && vid_idx < 0)
+            vid_idx = i;
+          if (p->codec_type == AVMEDIA_TYPE_AUDIO && aid_idx < 0)
+            aid_idx = i;
+        }
+        if (vid_idx >= 0) {
+          AVCodecParameters *vpar = fmt_ctx->streams[vid_idx]->codecpar;
+          videoInfoLabel +=
+              QString("视频: %1x%2  ").arg(vpar->width).arg(vpar->height);
+        }
+        if (aid_idx >= 0) {
+          AVCodecParameters *apar = fmt_ctx->streams[aid_idx]->codecpar;
+          videoInfoLabel += QString("音频: %1Hz %2ch  ")
+                                .arg(apar->sample_rate)
+                                .arg(apar->channels);
+        }
+        if (fmt_ctx->duration > 0) {
+          int sec = fmt_ctx->duration / AV_TIME_BASE;
+          int min = sec / 60;
+          sec = sec % 60;
+          videoInfoLabel += QString("时长: %1:%2  ")
+                                .arg(min, 2, 10, QChar('0'))
+                                .arg(sec, 2, 10, QChar('0'));
+        }
       }
-      if (vid_idx >= 0) {
-        AVCodecParameters *vpar = fmt_ctx->streams[vid_idx]->codecpar;
-        videoInfoLabel +=
-            QString("视频: %1x%2  ").arg(vpar->width).arg(vpar->height);
-      }
-      if (aid_idx >= 0) {
-        AVCodecParameters *apar = fmt_ctx->streams[aid_idx]->codecpar;
-        videoInfoLabel += QString("音频: %1Hz %2ch  ")
-                              .arg(apar->sample_rate)
-                              .arg(apar->channels);
-      }
-      if (fmt_ctx->duration > 0) {
-        int sec = fmt_ctx->duration / AV_TIME_BASE;
-        int min = sec / 60;
-        sec = sec % 60;
-        videoInfoLabel += QString("时长: %1:%2  ")
-                              .arg(min, 2, 10, QChar('0'))
-                              .arg(sec, 2, 10, QChar('0'));
-      }
+      avformat_close_input(&fmt_ctx);
     }
-    avformat_close_input(&fmt_ctx);
   }
 
-  // 新增：保存文件名
+  // 保存文件名
   currentFileName = QFileInfo(path).fileName();
 
   // 重置滚动
@@ -383,25 +403,20 @@ void VideoPlayer::onPositionChanged(qint64 pts) {
     return;
   }
 
-  // 检查 pts 变化是否足够大以至于需要更新 UI
-  // 只有当时间变化超过 100ms 或者是显示覆盖栏时才更新进度条
-  bool needUpdate = showOverlayBar || abs(currentPts - pts) > 100;
+  // 计算 pts 变化量
+  qint64 ptsDiff = pts - currentPts;
 
+  // 更新当前播放时间
   currentPts = pts;
 
-  // 记录当前歌词索引
-  int oldLyricIndex = lyricManager->getCurrentLyricIndex();
-
   // 更新歌词和字幕索引
-  lyricManager->updateLyricsIndex(pts);
   subtitleManager->updateSubtitleIndex(pts);
 
-  // 如果歌词索引发生变化，重置淡入淡出计时器并启动动画
-  if (oldLyricIndex != lyricManager->getCurrentLyricIndex()) {
-    lyricFadeTimer.restart();
-    overlayTimer->start();
-    needUpdate = true; // 歌词变化时需要更新 UI
-  }
+  // 以下情况需要更新 UI:
+  // 1. 显示覆盖栏时
+  // 2. 时间变化超过100ms
+  // 3. 歌词索引发生变化
+  bool needUpdate = showOverlayBar || abs(ptsDiff) > 100;
 
   // 只在需要时更新 UI
   if (needUpdate) {
@@ -481,19 +496,17 @@ void VideoPlayer::mouseMoveEvent(QMouseEvent *e) {
 
 void VideoPlayer::seekByDelta(int dx) {
   // 动态调整每像素对应的毫秒数，随视频时长自适应
-  // 例如：每像素调整为总时长的1/500，限制最小20ms，最大2000ms
+  // 例如：每像素调整为总时长的 1/500，限制最小 20ms，最大 2000ms
   qint64 msPerPx = 20;
   if (duration > 0) {
-    msPerPx = qBound<qint64>(20, duration / 5000, 2000);
+    msPerPx = qBound<qint64>(20, duration / 10000, 2000);
   }
   qint64 delta = dx * msPerPx;
   qint64 target = qBound<qint64>(0, currentPts + delta, duration);
   currentPts = target;
 }
 
-void VideoPlayer::resizeEvent(QResizeEvent *) {
-  // 移除 videoWidget 相关代码
-}
+void VideoPlayer::resizeEvent(QResizeEvent *) {}
 
 void VideoPlayer::paintEvent(QPaintEvent *) {
   QPainter p(this);
@@ -510,9 +523,16 @@ void VideoPlayer::paintEvent(QPaintEvent *) {
   drawToastMessage(p);
   // 绘制错误消息
   if (!errorMessage.isEmpty()) {
-    QFont errFont("Microsoft YaHei", overlayFontSize + 4, QFont::Bold);
-    p.setFont(errFont);
+    // 使用静态字体对象，避免频繁创建
+    static QFont errFont("Microsoft YaHei", 0, QFont::Bold);
+    errFont.setPointSize(overlayFontSize + 4);
+
     QString msg = errorMessage;
+
+    // 保存当前绘图状态
+    p.save();
+
+    p.setFont(errFont);
     QFontMetrics fm(errFont);
     int textWidth = fm.horizontalAdvance(msg);
     int textHeight = fm.height();
@@ -525,6 +545,9 @@ void VideoPlayer::paintEvent(QPaintEvent *) {
     p.drawRoundedRect(boxRect, 18, 18);
     p.setPen(QColor(220, 40, 40));
     p.drawText(boxRect, Qt::AlignCenter, msg);
+
+    // 恢复绘图状态
+    p.restore();
   }
   if (trackButtonTimer->elapsed() > 100) {
     trackButton->setVisible(showOverlayBar);
@@ -633,50 +656,29 @@ void VideoPlayer::drawProgressBar(QPainter &p) {
 void VideoPlayer::drawSubtitlesAndLyrics(QPainter &p) {
   QRect lyricRect = rect().adjusted(0, height() - 70, 0, -10);
   subtitleRenderer->drawSrtSubtitles(p, lyricRect, overlayFontSize, currentPts);
-  lyricRenderer->drawLyrics(p, lyricRect, overlayFontSize, lyricOpacity,
-                            lyricFadeTimer);
+  lyricRenderer->drawLyricsByTime(p, lyricRect, overlayFontSize, currentPts);
 }
 
-void VideoPlayer::updateOverlay() {
-  if (lyricFadeTimer.isValid()) {
-    qint64 elapsed = lyricFadeTimer.elapsed();
-    if (elapsed < 600) { // 延长一点淡入时间，让效果更明显
-      // 非线性淡入效果，开始较慢，然后加速
-      double newOpacity = qMin(1.0, 0.2 + (elapsed / 600.0) * 0.8);
-
-      // 只有当不透明度变化超过 0.03 时才更新界面
-      if (qAbs(newOpacity - lyricOpacity) > 0.03) {
-        lyricOpacity = newOpacity;
-        scheduleUpdate();
-      }
-    } else {
-      // 淡入完成
-      if (lyricOpacity < 1.0) {
-        lyricOpacity = 1.0;
-        scheduleUpdate();
-      }
-      // 保持计时器有效，以便LyricRenderer能够使用它计算淡出效果
-      // 但停止定时更新，因为淡入已完成
-      overlayTimer->stop();
-    }
-  }
-}
+void VideoPlayer::updateOverlay() { scheduleUpdate(); }
 
 void VideoPlayer::showOverlayBarForSeconds(int seconds) {
   showOverlayBar = true;
   overlayBarTimer->start(seconds * 1000);
 }
 void VideoPlayer::scheduleUpdate() {
-  // 获取当前时间戳
-  qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+  // 只有在未标记待更新时才设置更新标记
+  if (!updatePending) {
+    // 获取当前时间戳
+    qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
 
-  // 如果距离上次更新时间超过 16ms (约 60 fps)，立即更新界面
-  if (currentTime - lastUpdateTime > 16) {
-    lastUpdateTime = currentTime;
-    QWidget::update();
-  } else if (currentTime - lastUpdateTime > 5) {
-    // 只有当间隔超过 5ms 时才设置标记，避免过于频繁的更新请求
-    updatePending = true;
+    // 如果距离上次更新时间超过 16ms (约 60 fps)，立即更新界面
+    if (currentTime - lastUpdateTime > 16) {
+      lastUpdateTime = currentTime;
+      QWidget::update();
+    } else {
+      // 设置更新标记，由 frameRateTimer 定时处理
+      updatePending = true;
+    }
   }
 }
 
@@ -695,8 +697,9 @@ void VideoPlayer::drawToastMessage(QPainter &p) {
     return;
   }
 
-  // 设置土司消息的字体
-  QFont toastFont("Microsoft YaHei", overlayFontSize + 2, QFont::Bold);
+  // 静态字体对象，避免频繁创建
+  static QFont toastFont("Microsoft YaHei", 0, QFont::Bold);
+  toastFont.setPointSize(overlayFontSize + 2);
   p.setFont(toastFont);
 
   // 计算文本尺寸
@@ -709,6 +712,9 @@ void VideoPlayer::drawToastMessage(QPainter &p) {
                   20, // 距离顶部20像素
                   textWidth + 40, textHeight + 16);
 
+  // 保存当前绘图状态，避免多余的重置操作
+  p.save();
+
   // 绘制圆角背景
   p.setRenderHint(QPainter::Antialiasing, true);
   p.setPen(Qt::NoPen);
@@ -718,4 +724,7 @@ void VideoPlayer::drawToastMessage(QPainter &p) {
   // 绘制文本
   p.setPen(Qt::white); // 白色文本
   p.drawText(toastRect, Qt::AlignCenter, toastMessage);
+
+  // 恢复绘图状态
+  p.restore();
 }
