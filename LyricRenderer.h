@@ -1,16 +1,18 @@
 #pragma once
+#include "LyricManager.h"
+#include <QElapsedTimer>
 #include <QPainter>
 #include <QRect>
-#include <QElapsedTimer>
-#include "LyricManager.h"
 
 class LyricManager; // 前置声明
 
 class LyricRenderer {
 public:
-    LyricRenderer(LyricManager* manager);
-    void drawLyrics(QPainter &p, const QRect &lyricRect, int overlayFontSize, qreal lyricOpacity, const QElapsedTimer &lyricFadeTimer);
+  LyricRenderer(LyricManager *manager);
+
+  void drawLyricsByTime(QPainter &p, const QRect &lyricRect,
+                        int overlayFontSize, qint64 currentTime);
 
 private:
-    LyricManager* lyricManager;
+  LyricManager *lyricManager;
 };
