@@ -3,7 +3,6 @@
 #include "LyricRenderer.h"
 #include "SubtitleManager.h"
 #include "SubtitleRenderer.h"
-#include "qelapsedtimer.h"
 #include "qglobal.h"
 #include <QAction>
 #include <QCoreApplication>
@@ -103,17 +102,15 @@ VideoPlayer::VideoPlayer(QWidget *parent)
   overlayTimer->setInterval(200);
   connect(overlayTimer, &QTimer::timeout, this, &VideoPlayer::updateOverlay);
 
-  // 进度条和媒体信息显示定时器
+  // 进度条显示定时器
   overlayBarTimer = new QTimer(this);
   overlayBarTimer->setSingleShot(true);
   connect(overlayBarTimer, &QTimer::timeout, this, [this]() {
     showOverlayBar = false;
+    updateOverlayVisibility();
     scheduleUpdate();
   });
   showOverlayBar = false;
-
-  trackButtonTimer = new QElapsedTimer();
-  trackButtonTimer->start();
 
   // 帧率控制定时器 - 60fps (约 16.67 ms)
   frameRateTimer = new QTimer(this);
@@ -125,48 +122,11 @@ VideoPlayer::VideoPlayer(QWidget *parent)
     }
   });
 
-  // 文件名滚动
-  scrollTimer = new QTimer(this);
-  scrollTimer->setInterval(80); // 降低到 12.5 fps，原来是 25 fps
-  scrollPause = false;
-  scrollPauseTimer = new QTimer(this);
-  scrollPauseTimer->setSingleShot(true);
-
   // 启动定时器 - 集中启动以提高代码清晰度
   frameRateTimer->start();
 
   // 重置状态变量
-  lastScrollUpdateTime = 0;
   updatePending = false;
-
-  connect(scrollTimer, &QTimer::timeout, this, [this]() {
-    if (scrollPause)
-      return;
-
-    // 增加滚动偏移
-    scrollOffset += 2;
-
-    // 只在显示覆盖栏时才更新 UI，否则只在较长间隔时更新
-    if (showOverlayBar) {
-      scheduleUpdate();
-    } else {
-      // 获取当前时间
-      qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
-      // 限制更新频率（200ms间隔）
-      if (currentTime - lastScrollUpdateTime > 200) {
-        lastScrollUpdateTime = currentTime;
-        scheduleUpdate();
-      }
-    }
-  });
-
-  connect(scrollPauseTimer, &QTimer::timeout, this, [this]() {
-    scrollPause = false;
-    scrollOffset = 0;
-    scheduleUpdate();
-  });
-
-  scrollOffset = 0;
 
   // libass 初始化
   assLibrary = ass_library_init();
@@ -200,10 +160,19 @@ VideoPlayer::VideoPlayer(QWidget *parent)
   subtitleRenderer = new SubtitleRenderer(subtitleManager);
 
   // 轨道切换按钮和菜单
-  trackButton = new QPushButton("轨道", this);
-  trackButton->setGeometry(10, 40, 60, 28);
-  trackButton->setStyleSheet(
-      "background:rgba(30,30,30,180);color:white;border-radius:8px;");
+  trackButton = new QPushButton(this);
+  trackButton->setGeometry(10, 10, 32, 32);         // 圆形按钮：宽高相等
+  trackButton->setIcon(QIcon(":/icons/track.png")); // 使用 qrc 资源路径
+  trackButton->setIconSize(QSize(24, 24));          // 图标大小适当缩小
+  trackButton->setStyleSheet("QPushButton {"
+                             "  background-color: rgba(30,30,30,180);"
+                             "  border: none;"
+                             "  border-radius: 16px;" // 半径为宽/2 实现圆形
+                             "}"
+                             "QPushButton:hover {"
+                             "  background-color: rgba(50,50,50,200);"
+                             "}");
+  trackButton->setToolTip("轨道切换");
   trackButton->raise();
   connect(trackButton, &QPushButton::clicked, this, [this]() {
     QMenu menu;
@@ -260,16 +229,37 @@ VideoPlayer::VideoPlayer(QWidget *parent)
     });
     menu.exec(trackButton->mapToGlobal(QPoint(0, trackButton->height())));
   });
+
+  // 字幕开关按钮
+  subtitleButton = new QPushButton(this);
+  subtitleButton->setGeometry(52, 10, 32, 32);             // 位置右移，避免重叠
+  subtitleButton->setIcon(QIcon(":/icons/subtitles.png")); // 初始启用状态图标
+  subtitleButton->setIconSize(QSize(24, 24));
+  subtitleButton->setStyleSheet("QPushButton {"
+                                "  background-color: rgba(30,30,30,180);"
+                                "  border: none;"
+                                "  border-radius: 16px;"
+                                "}"
+                                "QPushButton:hover {"
+                                "  background-color: rgba(50,50,50,200);"
+                                "}");
+  subtitleButton->setToolTip("字幕开关");
+  subtitleButton->raise();
+  connect(subtitleButton, &QPushButton::clicked, this, [this]() {
+    subtitlesEnabled = !subtitlesEnabled;
+    subtitleButton->setIcon(QIcon(subtitlesEnabled
+                                      ? ":/icons/subtitles.png"
+                                      : ":/icons/subtitles_off.png"));
+    toastMessage = subtitlesEnabled ? "字幕已开启" : "字幕已关闭";
+    toastTimer->start(2000);
+    scheduleUpdate();
+  });
 }
 
 VideoPlayer::~VideoPlayer() {
   // 停止所有定时器
   if (frameRateTimer)
     frameRateTimer->stop();
-  if (scrollTimer)
-    scrollTimer->stop();
-  if (scrollPauseTimer)
-    scrollPauseTimer->stop();
   if (speedPressTimer)
     speedPressTimer->stop();
   if (toastTimer)
@@ -317,77 +307,14 @@ void VideoPlayer::play(const QString &path) {
   lyricManager->loadLyrics(path);
   subtitleManager->reset();
 
-  // 加载字幕（支持模糊匹配）
-  QString basePath =
-      QFileInfo(path).absolutePath() + "/" + QFileInfo(path).completeBaseName();
-  QString assPath = basePath + ".ass";
-  QString srtPath = basePath + ".srt";
-  QString subtitlePath;
-  if (QFile::exists(assPath)) {
-    subtitleManager->loadAssSubtitle(assPath, assLibrary, assRenderer);
-  } else if (QFile::exists(srtPath)) {
-    subtitleManager->loadSrtSubtitle(srtPath);
-  } else if (subtitleManager->findSimilarSubtitle(path, subtitlePath)) {
-    if (subtitlePath.endsWith(".ass", Qt::CaseInsensitive)) {
-      subtitleManager->loadAssSubtitle(subtitlePath, assLibrary, assRenderer);
-    } else if (subtitlePath.endsWith(".srt", Qt::CaseInsensitive)) {
-      subtitleManager->loadSrtSubtitle(subtitlePath);
-    }
-  }
+  subtitleManager->loadSubtitle(path, assLibrary, assRenderer);
 
-  // 读取视频/音频信息
-  videoInfoLabel.clear();
-
-  // 使用 FFmpeg API 直接读取媒体信息
-  {
-    AVFormatContext *fmt_ctx = nullptr;
-    if (avformat_open_input(&fmt_ctx, path.toUtf8().constData(), nullptr,
-                            nullptr) == 0) {
-      if (avformat_find_stream_info(fmt_ctx, nullptr) >= 0) {
-        int vid_idx = -1, aid_idx = -1;
-        for (unsigned i = 0; i < fmt_ctx->nb_streams; i++) {
-          AVCodecParameters *p = fmt_ctx->streams[i]->codecpar;
-          if (p->codec_type == AVMEDIA_TYPE_VIDEO && vid_idx < 0)
-            vid_idx = i;
-          if (p->codec_type == AVMEDIA_TYPE_AUDIO && aid_idx < 0)
-            aid_idx = i;
-        }
-        if (vid_idx >= 0) {
-          AVCodecParameters *vpar = fmt_ctx->streams[vid_idx]->codecpar;
-          videoInfoLabel +=
-              QString("视频: %1x%2  ").arg(vpar->width).arg(vpar->height);
-        }
-        if (aid_idx >= 0) {
-          AVCodecParameters *apar = fmt_ctx->streams[aid_idx]->codecpar;
-          videoInfoLabel += QString("音频: %1Hz %2ch  ")
-                                .arg(apar->sample_rate)
-                                .arg(apar->channels);
-        }
-        if (fmt_ctx->duration > 0) {
-          int sec = fmt_ctx->duration / AV_TIME_BASE;
-          int min = sec / 60;
-          sec = sec % 60;
-          videoInfoLabel += QString("时长: %1:%2  ")
-                                .arg(min, 2, 10, QChar('0'))
-                                .arg(sec, 2, 10, QChar('0'));
-        }
-      }
-      avformat_close_input(&fmt_ctx);
-    }
-  }
-
-  // 保存文件名
-  currentFileName = QFileInfo(path).fileName();
-
-  // 重置滚动
-  scrollOffset = 0;
-  scrollTimer->stop();
   decoder->start(path);
   show();
   showOverlayBar = true;
   overlayBarTimer->start(5 * 1000);
+  updateOverlayVisibility();
   scheduleUpdate();
-  scrollTimer->start();
 }
 
 void VideoPlayer::onFrame(const QSharedPointer<QImage> &frame) {
@@ -449,20 +376,21 @@ void VideoPlayer::mouseReleaseEvent(QMouseEvent *) {
     }
     showOverlayBar = true;
     overlayBarTimer->start(5 * 1000);
+    updateOverlayVisibility();
     scheduleUpdate();
   } else {
     decoder->togglePause();
-    // 判断当前是否为暂停状态
+    // 根据暂停状态调整控件可见性
     if (decoder->isPaused()) {
-      // 暂停时一直显示 overlay
+      // 暂停后一直显示叠加层
       overlayBarTimer->stop();
       showOverlayBar = true;
-      scheduleUpdate();
+      updateOverlayVisibility();
     } else {
-      // 播放时显示 5 秒 overlay
+      // 暂停后显示 5 秒叠加层
       showOverlayBar = true;
       overlayBarTimer->start(5 * 1000);
-      scheduleUpdate();
+      updateOverlayVisibility();
     }
   }
 }
@@ -498,6 +426,7 @@ void VideoPlayer::seekByDelta(int dx) {
 void VideoPlayer::resizeEvent(QResizeEvent *) {}
 
 void VideoPlayer::paintEvent(QPaintEvent *) {
+  // 绘制视频帧
   QPainter p(this);
   p.fillRect(rect(), Qt::black);
   if (currentFrame && !currentFrame->isNull()) {
@@ -508,8 +437,18 @@ void VideoPlayer::paintEvent(QPaintEvent *) {
     targetRect.moveCenter(rect().center());
     p.drawImage(targetRect, *currentFrame);
   }
+
+  // 绘制字幕和歌词
+  drawSubtitlesAndLyrics(p);
+  if (subtitleManager->hasAss() && subtitleManager->getAssTrack() &&
+      assRenderer) {
+    subtitleRenderer->setAssRenderer(assRenderer);
+    subtitleRenderer->drawAssSubtitles(p, width(), height(), currentPts);
+  }
+
   // 绘制顶部土司消息
   drawToastMessage(p);
+
   // 绘制错误消息
   if (!errorMessage.isEmpty()) {
     // 使用静态字体对象，避免频繁创建
@@ -538,122 +477,44 @@ void VideoPlayer::paintEvent(QPaintEvent *) {
     // 恢复绘图状态
     p.restore();
   }
-  if (trackButtonTimer->elapsed() > 100) {
-    trackButton->setVisible(showOverlayBar);
-    trackButton->setEnabled(true);
-    trackButton->raise();
-    trackButtonTimer->restart();
-  }
+
   if (showOverlayBar) {
-    drawOverlayBar(p);
+    drawProgressBar(p);
   }
-  drawSubtitlesAndLyrics(p);
-  if (subtitleManager->hasAss() && subtitleManager->getAssTrack() &&
-      assRenderer) {
-    subtitleRenderer->setAssRenderer(assRenderer);
-    subtitleRenderer->drawAssSubtitles(p, width(), height(), currentPts);
-  }
-}
-
-void VideoPlayer::drawOverlayBar(QPainter &p) {
-  if (!videoInfoLabel.isEmpty() || !currentFileName.isEmpty()) {
-    QFont infoFont("Microsoft YaHei", overlayFontSize, QFont::Bold);
-    p.setFont(infoFont);
-    p.setPen(Qt::white);
-    QRect infoRect = QRect(10, 10, width() / 1.5, 22);
-    p.setBrush(QColor(0, 0, 0, 128));
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.drawRoundedRect(infoRect.adjusted(-4, -2, 4, 2), 6, 6);
-
-    QString infoText = currentFileName;
-    if (!videoInfoLabel.isEmpty()) {
-      infoText += "  |  " + videoInfoLabel;
-    }
-
-    QFontMetrics fm(infoFont);
-    int textWidth = fm.horizontalAdvance(infoText);
-    int rectWidth = infoRect.width() - 10;
-    int x = infoRect.left() + 5;
-    int y = infoRect.top();
-    int availableWidth = rectWidth;
-
-    if (textWidth > availableWidth) {
-      int totalScroll = textWidth + 40;
-      int offset = scrollOffset % totalScroll;
-      int drawX = x - offset;
-      p.setClipRect(infoRect.adjusted(2, 2, -2, -2));
-      p.drawText(drawX, y + infoRect.height() - 8, infoText);
-      if (textWidth - offset < availableWidth) {
-        p.drawText(drawX + totalScroll, y + infoRect.height() - 8, infoText);
-      }
-      p.setClipping(false);
-
-      if (!scrollPause && offset + 2 >= totalScroll - 2) {
-        scrollPause = true;
-        scrollPauseTimer->start(3000);
-      }
-    } else {
-      p.drawText(infoRect, Qt::AlignLeft | Qt::AlignVCenter, infoText);
-    }
-  }
-
-  drawProgressBar(p);
 }
 
 void VideoPlayer::drawProgressBar(QPainter &p) {
-  double pct = duration > 0 ? double(currentPts) / duration : 0;
-  int barMargin = 20;
-  int barWidth = width() - barMargin * 2;
-  int barHeight = 10;
-  int barY = height() - 30;
-  QRect bar(barMargin, barY, barWidth, barHeight);
-  int radius = barHeight / 2;
-  p.setRenderHint(QPainter::Antialiasing, true);
+  double pct = (duration > 0) ? double(currentPts) / duration : 0.0;
 
-  QPainterPath shadowPath;
-  shadowPath.addRoundedRect(bar.adjusted(-2, 2, 2, 6), radius + 2, radius + 2);
-  QColor shadowColor(0, 0, 0, 80);
-  p.save();
-  p.setPen(Qt::NoPen);
-  p.setBrush(shadowColor);
-  p.drawPath(shadowPath);
-  p.restore();
+  // 样式参数
+  int barHeight = 4;
+  int barMarginX = 0;
+  int barWidth = width() - barMarginX * 2;
+  int barY = height() - barHeight;
+  QRect bar(barMarginX, barY, barWidth, barHeight);
 
-  p.setPen(Qt::NoPen);
-  p.setBrush(QColor(255, 255, 255, 60));
-  p.drawRoundedRect(bar, radius, radius);
+  p.setRenderHint(QPainter::Antialiasing);
 
+  // 播放进度（红色）
   int playedWidth = int(bar.width() * pct);
   if (playedWidth > 0) {
-    QRect playedRect = QRect(bar.left(), bar.top(), playedWidth, bar.height());
-    p.setBrush(Qt::white);
-    p.drawRoundedRect(playedRect, radius, radius);
-    if (playedWidth < bar.height()) {
-      QPainterPath path;
-      path.moveTo(bar.left(), bar.top() + bar.height() / 2.0);
-      path.arcTo(bar.left(), bar.top(), bar.height(), bar.height(), 90, 180);
-      path.closeSubpath();
-      p.fillPath(path, Qt::white);
-    }
+    QRect playedRect(bar.left(), bar.top(), playedWidth, bar.height());
+    p.setBrush(QColor(255, 0, 0)); // 红色
+    p.drawRect(playedRect);
   }
-
-  p.setPen(QPen(Qt::white, 1));
-  p.setBrush(Qt::NoBrush);
-  p.drawRoundedRect(bar, radius, radius);
 }
 
 void VideoPlayer::drawSubtitlesAndLyrics(QPainter &p) {
   QRect lyricRect = rect().adjusted(0, height() - 70, 0, -10);
-  subtitleRenderer->drawSrtSubtitles(p, lyricRect, overlayFontSize, currentPts);
-  lyricRenderer->drawLyricsByTime(p, lyricRect, overlayFontSize, currentPts);
+  if (subtitlesEnabled) {
+    subtitleRenderer->drawSrtSubtitles(p, lyricRect, overlayFontSize,
+                                       currentPts);
+    lyricRenderer->drawLyricsByTime(p, lyricRect, overlayFontSize, currentPts);
+  }
 }
 
 void VideoPlayer::updateOverlay() { scheduleUpdate(); }
 
-void VideoPlayer::showOverlayBarForSeconds(int seconds) {
-  showOverlayBar = true;
-  overlayBarTimer->start(seconds * 1000);
-}
 void VideoPlayer::scheduleUpdate() {
   // 只有在未标记待更新时才设置更新标记
   if (!updatePending) {
@@ -716,4 +577,11 @@ void VideoPlayer::drawToastMessage(QPainter &p) {
 
   // 恢复绘图状态
   p.restore();
+}
+
+void VideoPlayer::updateOverlayVisibility() {
+  trackButton->setVisible(showOverlayBar);
+  subtitleButton->setVisible(showOverlayBar);
+  trackButton->raise();
+  subtitleButton->raise();
 }

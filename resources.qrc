@@ -1,0 +1,7 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+    <file>icons/track.png</file>
+    <file>icons/subtitles.png</file>
+    <file>icons/subtitles_off.png</file>
+</qresource>
+</RCC>

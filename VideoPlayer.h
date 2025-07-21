@@ -71,29 +71,18 @@ private:
   ASS_Renderer *assRenderer = nullptr;
 
   QSharedPointer<QImage> currentFrame;
-  QString videoInfoLabel;
-
-  // 进度条和媒体信息显示控制
+  // 进度条显示控制
   bool showOverlayBar = false;
   QTimer *overlayBarTimer = nullptr;
-
-  // 文件名滚动
-  QString currentFileName;
-  int scrollOffset = 0;
-  QTimer *scrollTimer = nullptr;
-  // 滚动停顿
-  bool scrollPause = false;
-  QTimer *scrollPauseTimer = nullptr;
 
   // 统一 overlay 字号
   int overlayFontSize = 10;
 
   void seekByDelta(int dx);
   void showOverlay(bool visible);
-  void drawOverlayBar(QPainter &p);
   void drawProgressBar(QPainter &p);
   void drawSubtitlesAndLyrics(QPainter &p);
-  void showOverlayBarForSeconds(int seconds);
+  void updateOverlayVisibility();
   void scheduleUpdate(); // 控制帧率的更新调度
 
   QFileSystemWatcher *screenStatusWatcher;
@@ -121,4 +110,8 @@ private:
   QTimer *toastTimer = nullptr;
   void drawToastMessage(QPainter &p);
   void showToastMessage(const QString &message, int durationMs = 1500);
+
+  // 字幕开关
+  QPushButton *subtitleButton = nullptr;
+  bool subtitlesEnabled = true;
 };

@@ -18,6 +18,8 @@ HEADERS += VideoPlayer.h \
            LyricRenderer.h \
            SubtitleRenderer.h
 
+RESOURCES += resources.qrc
+
 QMAKE_CXXFLAGS += -Wno-deprecated-declarations
 
 INCLUDEPATH += $$PWD/include/

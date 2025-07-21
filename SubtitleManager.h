@@ -14,6 +14,7 @@ struct SubtitleLine {
 class SubtitleManager {
 public:
     SubtitleManager();
+    void loadSubtitle(const QString &path, ASS_Library *assLibrary, ASS_Renderer *assRenderer);
     void loadSrtSubtitle(const QString &path);
     void loadAssSubtitle(const QString &path, ASS_Library *assLibrary, ASS_Renderer *assRenderer);
     void updateSubtitleIndex(qint64 pts);
