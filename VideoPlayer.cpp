@@ -18,6 +18,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSharedPointer>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QTimer>
 #include <ass/ass.h>
@@ -407,6 +408,34 @@ void VideoPlayer::mouseMoveEvent(QMouseEvent *e) {
   scheduleUpdate();
 }
 
+void VideoPlayer::doScreenShot() {
+  // 使用 /tmp 目录保存截图
+  QString tmpPath = "/tmp";
+
+  // 生成带时间戳的文件名
+  QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss");
+  QString filePath =
+      QString("%1/NewPlayer-Screenshot-%2.png").arg(tmpPath).arg(timestamp);
+
+  // 截取当前窗口内容并保存
+  QPixmap screenshot = this->grab();
+  if (screenshot.save(filePath, "PNG")) {
+    showToastMessage(QString("截图已保存到: %1").arg(filePath));
+  } else {
+    showToastMessage("截图保存失败");
+  }
+}
+
+void VideoPlayer::keyPressEvent(QKeyEvent *e) {
+  // 处理截图快捷键 (PrintScreen 或 Ctrl+S)
+  if (e->key() == Qt::Key_Print ||
+      (e->key() == Qt::Key_S && e->modifiers() & Qt::ControlModifier)) {
+    doScreenShot();
+  }
+
+  QWidget::keyPressEvent(e);
+}
+
 void VideoPlayer::seekByDelta(int dx) {
   // 动态调整每像素对应的毫秒数，随视频时长自适应
   // 例如：每像素调整为总时长的 1/500，限制最小 20ms，最大 2000ms
@@ -484,7 +513,7 @@ void VideoPlayer::drawProgressBar(QPainter &p) {
 
   // 样式参数
   const int barHeight = 4;
-  const int radius = 2;  // 圆角半径
+  const int radius = 2; // 圆角半径
   const int marginX = 0;
   const int barWidth = width() - marginX * 2;
   const int barY = height() - barHeight;
@@ -496,13 +525,13 @@ void VideoPlayer::drawProgressBar(QPainter &p) {
   p.setRenderHint(QPainter::Antialiasing, true);
 
   // 背景轨道（浅灰色）
-  p.setBrush(QColor(80, 80, 80, 180));  // 半透明深灰
+  p.setBrush(QColor(80, 80, 80, 180)); // 半透明深灰
   p.setPen(Qt::NoPen);
   p.drawRoundedRect(fullBar, radius, radius);
 
   // 播放进度（红色）
   if (playedBar.width() > 0.5) {
-    p.setBrush(QColor(255, 60, 60));  // 柔和红色
+    p.setBrush(QColor(255, 60, 60)); // 柔和红色
     p.drawRoundedRect(playedBar, radius, radius);
   }
 }

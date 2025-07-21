@@ -28,6 +28,7 @@ protected:
   void mouseReleaseEvent(QMouseEvent *e) override;
   void mouseDoubleClickEvent(QMouseEvent *e) override;
   void mouseMoveEvent(QMouseEvent *e) override;
+  void keyPressEvent(QKeyEvent *e) override;
 
   void resizeEvent(QResizeEvent *e) override;
   void paintEvent(QPaintEvent *e) override;
@@ -128,4 +129,7 @@ private:
   // 字幕开关
   QPushButton *subtitleButton = nullptr;
   bool subtitlesEnabled = true;
+
+  // 截屏
+  void doScreenShot();
 };
