@@ -483,20 +483,27 @@ void VideoPlayer::drawProgressBar(QPainter &p) {
   double pct = (duration > 0) ? double(currentPts) / duration : 0.0;
 
   // 样式参数
-  int barHeight = 4;
-  int barMarginX = 0;
-  int barWidth = width() - barMarginX * 2;
-  int barY = height() - barHeight;
-  QRect bar(barMarginX, barY, barWidth, barHeight);
+  const int barHeight = 4;
+  const int radius = 2;  // 圆角半径
+  const int marginX = 0;
+  const int barWidth = width() - marginX * 2;
+  const int barY = height() - barHeight;
 
-  p.setRenderHint(QPainter::Antialiasing);
+  QRectF fullBar(marginX, barY, barWidth, barHeight);
+  QRectF playedBar = fullBar;
+  playedBar.setWidth(fullBar.width() * pct);
+
+  p.setRenderHint(QPainter::Antialiasing, true);
+
+  // 背景轨道（浅灰色）
+  p.setBrush(QColor(80, 80, 80, 180));  // 半透明深灰
+  p.setPen(Qt::NoPen);
+  p.drawRoundedRect(fullBar, radius, radius);
 
   // 播放进度（红色）
-  int playedWidth = int(bar.width() * pct);
-  if (playedWidth > 0) {
-    QRect playedRect(bar.left(), bar.top(), playedWidth, bar.height());
-    p.setBrush(QColor(255, 0, 0)); // 红色
-    p.drawRect(playedRect);
+  if (playedBar.width() > 0.5) {
+    p.setBrush(QColor(255, 60, 60));  // 柔和红色
+    p.drawRoundedRect(playedBar, radius, radius);
   }
 }
 
