@@ -105,11 +105,25 @@ private:
   bool updatePending = false;  // 是否有未处理的更新请求
   qint64 lastUpdateTime = 0;   // 上次更新时间
 
-  // 顶部土司消息相关
+  // 顶部土司消息
   QString toastMessage;
-  QTimer *toastTimer = nullptr;
+  QTimer *toastTimer;
   void drawToastMessage(QPainter &p);
-  void showToastMessage(const QString &message, int durationMs = 1500);
+  void showToastMessage(const QString &message);
+
+  int toastElapsedMs = 0;
+  qreal toastOpacity = 0.0;
+  int toastSlideOffset = -30;
+
+  const int toastTotalDuration = 2100;
+
+  // 手动管理的土司消息
+  QString manualToastMessage;
+  qreal manualToastOpacity = 0.8;
+  bool manualToastVisible = false;
+
+  void showManualToast(const QString &msg);
+  void clearManualToast();
 
   // 字幕开关
   QPushButton *subtitleButton = nullptr;

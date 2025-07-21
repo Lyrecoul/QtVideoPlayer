@@ -74,9 +74,13 @@ VideoPlayer::VideoPlayer(QWidget *parent)
 
   // 顶部土司消息
   toastTimer = new QTimer(this);
-  toastTimer->setSingleShot(true);
+  toastTimer->setInterval(16); // 每帧刷新 (~60 FPS)
   connect(toastTimer, &QTimer::timeout, this, [this]() {
-    toastMessage.clear();
+    toastElapsedMs += 16;
+    if (toastElapsedMs >= toastTotalDuration) {
+      toastTimer->stop();
+      toastMessage.clear();
+    }
     scheduleUpdate();
   });
 
@@ -90,10 +94,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
       decoder->setPlaybackSpeed(2.0f); // 设置 2 倍速
 
       // 显示 2 倍速提示，使用土司消息
-      toastMessage = "▶▶ 2 倍速播放中";
-      toastTimer->stop(); // 停止计时器，确保消息持续显示
-
-      scheduleUpdate();
+      showManualToast("x2 ▶▶");
     }
   });
 
@@ -186,8 +187,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
       audioGroup->addAction(act);
       connect(act, &QAction::triggered, this, [this, i]() {
         decoder->setAudioTrack(i);
-        toastMessage = tr("切换音轨: %1").arg(decoder->audioTrackName(i));
-        toastTimer->start(2000);
+        showToastMessage(tr("音轨: %1").arg(decoder->audioTrackName(i)));
         scheduleUpdate();
       });
     }
@@ -212,8 +212,8 @@ VideoPlayer::VideoPlayer(QWidget *parent)
       videoGroup->addAction(act);
       connect(act, &QAction::triggered, this, [this, i]() {
         decoder->setVideoTrack(i);
-        toastMessage = tr("切换视频轨道: %1").arg(decoder->videoTrackName(i));
-        toastTimer->start(2000);
+        showToastMessage(
+            tr("切换视频轨道: %1").arg(decoder->videoTrackName(i)));
         scheduleUpdate();
       });
     }
@@ -223,8 +223,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
     videoGroup->addAction(noVideoAct);
     connect(noVideoAct, &QAction::triggered, this, [this]() {
       decoder->setVideoTrack(-1);
-      toastMessage = tr("切换视频轨道: 无视频轨道");
-      toastTimer->start(2000);
+      showToastMessage("视频轨道: 无");
       scheduleUpdate();
     });
     menu.exec(trackButton->mapToGlobal(QPoint(0, trackButton->height())));
@@ -250,8 +249,7 @@ VideoPlayer::VideoPlayer(QWidget *parent)
     subtitleButton->setIcon(QIcon(subtitlesEnabled
                                       ? ":/icons/subtitles.png"
                                       : ":/icons/subtitles_off.png"));
-    toastMessage = subtitlesEnabled ? "字幕已开启" : "字幕已关闭";
-    toastTimer->start(2000);
+    showToastMessage(subtitlesEnabled ? "字幕已开启" : "字幕已关闭");
     scheduleUpdate();
   });
 }
@@ -362,9 +360,7 @@ void VideoPlayer::mouseReleaseEvent(QMouseEvent *) {
   if (isSpeedPressed) {
     decoder->setPlaybackSpeed(1.0f);
     isSpeedPressed = false;
-    toastMessage = "";
-    toastTimer->start(200); // 显示 0.2 秒后消失
-    scheduleUpdate();
+    clearManualToast();
     return;
   }
 
@@ -532,51 +528,91 @@ void VideoPlayer::scheduleUpdate() {
   }
 }
 
-void VideoPlayer::showToastMessage(const QString &message, int durationMs) {
-  toastMessage = message;
-  if (durationMs > 0) {
-    toastTimer->start(durationMs);
-  } else {
-    toastTimer->stop(); // 停止定时器，确保消息持续显示
-  }
-  scheduleUpdate();
+void VideoPlayer::showToastMessage(const QString &msg) {
+  toastMessage = msg;
+  toastElapsedMs = 0;
+  toastOpacity = 0.0;
+  toastSlideOffset = -30;
+  toastTimer->start();
+  update();
 }
 
 void VideoPlayer::drawToastMessage(QPainter &p) {
-  if (toastMessage.isEmpty()) {
-    return;
+  p.setRenderHint(QPainter::Antialiasing);
+
+  // ------- 自动 Toast -------
+  if (!toastMessage.isEmpty()) {
+    const int fadeDuration = 300;
+    const int displayDuration = 1500;
+
+    if (toastElapsedMs < fadeDuration) {
+      toastOpacity = toastElapsedMs / double(fadeDuration);
+      toastSlideOffset = -30 + int(30 * toastOpacity);
+    } else if (toastElapsedMs < fadeDuration + displayDuration) {
+      toastOpacity = 1.0;
+      toastSlideOffset = 0;
+    } else {
+      qreal progress = (toastElapsedMs - fadeDuration - displayDuration) /
+                       double(fadeDuration);
+      toastOpacity = 1.0 - progress;
+      toastSlideOffset = int(30 * progress);
+    }
+
+    static QFont toastFont("Microsoft YaHei", 0, QFont::Bold);
+    toastFont.setPointSize(overlayFontSize + 2);
+    p.setFont(toastFont);
+
+    QFontMetrics fm(toastFont);
+    int textWidth = fm.horizontalAdvance(toastMessage);
+    int textHeight = fm.height();
+    QRect toastRect((width() - textWidth) / 2 - 20, 20 + toastSlideOffset,
+                    textWidth + 40, textHeight + 16);
+
+    p.save();
+    p.setOpacity(toastOpacity);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 200));
+    p.drawRoundedRect(toastRect, 12, 12);
+    p.setPen(Qt::white);
+    p.drawText(toastRect, Qt::AlignCenter, toastMessage);
+    p.restore();
   }
 
-  // 静态字体对象，避免频繁创建
-  static QFont toastFont("Microsoft YaHei", 0, QFont::Bold);
-  toastFont.setPointSize(overlayFontSize + 2);
-  p.setFont(toastFont);
+  // ------- 手动 Toast -------
+  if (manualToastVisible && !manualToastMessage.isEmpty()) {
+    static QFont manualFont("Microsoft YaHei", 0, QFont::Bold);
+    manualFont.setPointSize(overlayFontSize);
+    p.setFont(manualFont);
 
-  // 计算文本尺寸
-  QFontMetrics fm(toastFont);
-  int textWidth = fm.horizontalAdvance(toastMessage);
-  int textHeight = fm.height();
+    QFontMetrics fm(manualFont);
+    int textWidth = fm.horizontalAdvance(manualToastMessage);
+    int textHeight = fm.height();
+    QRect toastRect((width() - textWidth) / 2 - 20,
+                    height() / 2 - textHeight / 2, // 居中显示
+                    textWidth + 20, textHeight + 8);
 
-  // 创建土司框矩形，位于屏幕上方居中
-  QRect toastRect((width() - textWidth) / 2 - 20,
-                  20, // 距离顶部20像素
-                  textWidth + 40, textHeight + 16);
+    p.save();
+    p.setOpacity(manualToastOpacity); // 支持透明度动画
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(20, 20, 20, 220));
+    p.drawRoundedRect(toastRect, 12, 12);
+    p.setPen(Qt::white);
+    p.drawText(toastRect, Qt::AlignCenter, manualToastMessage);
+    p.restore();
+  }
+}
 
-  // 保存当前绘图状态，避免多余的重置操作
-  p.save();
+void VideoPlayer::showManualToast(const QString &msg) {
+  manualToastMessage = msg;
+  manualToastVisible = true;
+  manualToastOpacity = 1.0; // 可选：初始时从0渐变
+  update();
+}
 
-  // 绘制圆角背景
-  p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(Qt::NoPen);
-  p.setBrush(QColor(0, 0, 0, 180)); // 半透明黑色背景
-  p.drawRoundedRect(toastRect, 12, 12);
-
-  // 绘制文本
-  p.setPen(Qt::white); // 白色文本
-  p.drawText(toastRect, Qt::AlignCenter, toastMessage);
-
-  // 恢复绘图状态
-  p.restore();
+void VideoPlayer::clearManualToast() {
+  manualToastMessage.clear();
+  manualToastVisible = false;
+  update();
 }
 
 void VideoPlayer::updateOverlayVisibility() {
