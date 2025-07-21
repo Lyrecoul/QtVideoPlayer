@@ -1,4 +1,5 @@
 #include "LyricManager.h"
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
@@ -99,12 +100,28 @@ void LyricManager::parseLyrics(const QString &lyricText, const QRegExp &rx) {
       }
     }
   }
+
+  // 先收集所有歌词
   for (auto it = lyricMap.constBegin(); it != lyricMap.constEnd(); ++it) {
-    lyrics.append({it.key(), it.value()});
+    lyrics.append({it.key(), 0, it.value()});
   }
+
+  // 按时间排序
   std::sort(
       lyrics.begin(), lyrics.end(),
       [](const LyricLine &a, const LyricLine &b) { return a.time < b.time; });
+
+  // 计算每句歌词的结束时间
+  if (!lyrics.isEmpty()) {
+    for (int i = 0; i < lyrics.size(); i++) {
+      if (i < lyrics.size() - 1) {
+        lyrics[i].endTime = lyrics[i + 1].time;
+      } else {
+        // 最后一句歌词显示 5 秒
+        lyrics[i].endTime = lyrics[i].time + 5000;
+      }
+    }
+  }
 }
 
 const QVector<LyricLine> &LyricManager::getLyrics() const { return lyrics; }
@@ -117,53 +134,53 @@ void LyricManager::reset() {
   lastLyricTime = 0;
   lyricChangeTimer.restart();
 }
+
 LyricLine LyricManager::getCurrentLyric(qint64 currentTime) const {
-  // 如果没有歌词，返回空行
   if (lyrics.isEmpty()) {
-    return {0, ""};
+    return {0, 0, ""};
   }
 
-  // 查找当前应该显示的歌词（时间小于等于当前时间的最新歌词）
+  // 添加调试输出
+  // qDebug() << "Current time:" << currentTime;
+  // for (const auto &lyric : lyrics) {
+  //   qDebug() << "Lyric time:" << lyric.time << "-" << lyric.endTime << ":" <<
+  //   lyric.text;
+  // }
+
   int currentIdx = -1;
   for (int i = 0; i < lyrics.size(); i++) {
     if (lyrics[i].time <= currentTime) {
       currentIdx = i;
     } else {
-      break; // 找到第一个时间大于当前时间的歌词，结束循环
+      break;
     }
   }
 
-  // 如果找不到符合条件的歌词（所有歌词时间都大于当前时间）
   if (currentIdx < 0) {
-    return {0, ""};
+    return {0, 0, ""};
   }
 
-  // 返回找到的最新歌词
   return lyrics[currentIdx];
 }
 
 LyricLine LyricManager::getLastLyric(qint64 currentTime) const {
-  // 如果没有歌词，返回空行
   if (lyrics.isEmpty()) {
-    return {0, ""};
+    return {0, 0, ""};
   }
 
-  // 找到当前应显示的歌词（时间小于等于当前时间的最新歌词）
   int currentIdx = -1;
   for (int i = 0; i < lyrics.size(); i++) {
     if (lyrics[i].time <= currentTime) {
       currentIdx = i;
     } else {
-      break; // 找到第一个时间大于当前时间的歌词，结束循环
+      break;
     }
   }
 
-  // 如果找不到当前歌词或者当前是第一行歌词，返回空行
   if (currentIdx <= 0) {
-    return {0, ""};
+    return {0, 0, ""};
   }
 
-  // 返回当前歌词的上一行
   return lyrics[currentIdx - 1];
 }
 

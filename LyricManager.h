@@ -5,7 +5,8 @@
 #include <QVector>
 
 struct LyricLine {
-  qint64 time;
+  qint64 time;     // 歌词开始显示时间(毫秒)
+  qint64 endTime;  // 歌词结束显示时间(毫秒)
   QString text;
 };
 

@@ -403,25 +403,14 @@ void VideoPlayer::onPositionChanged(qint64 pts) {
     return;
   }
 
-  // 计算 pts 变化量
-  qint64 ptsDiff = pts - currentPts;
-
   // 更新当前播放时间
   currentPts = pts;
 
   // 更新歌词和字幕索引
   subtitleManager->updateSubtitleIndex(pts);
 
-  // 以下情况需要更新 UI:
-  // 1. 显示覆盖栏时
-  // 2. 时间变化超过100ms
-  // 3. 歌词索引发生变化
-  bool needUpdate = showOverlayBar || abs(ptsDiff) > 100;
-
-  // 只在需要时更新 UI
-  if (needUpdate) {
-    scheduleUpdate();
-  }
+  // 更新界面
+  scheduleUpdate();
 }
 
 void VideoPlayer::mousePressEvent(QMouseEvent *e) {
