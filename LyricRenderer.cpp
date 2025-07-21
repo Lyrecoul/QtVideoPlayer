@@ -20,11 +20,11 @@ void LyricRenderer::drawLyricsByTime(QPainter &p, const QRect &lyricRect,
   qint64 startTime = currentLyric.time;
   qint64 endTime = currentLyric.endTime;
   QString lyricText = currentLyric.text;
-  const qint64 fadeDuration = 400; // 淡入淡出时间400ms
+  const qint64 fadeDuration = 400; // 淡入淡出时间 400ms
   int alpha = 0;
 
-  qDebug() << "Rendering lyric at time:" << currentTime << "(" << startTime
-           << "-" << endTime << "):" << lyricText;
+  // qDebug() << "Rendering lyric at time:" << currentTime << "(" << startTime
+  //          << "-" << endTime << "):" << lyricText;
 
   // 简化透明度计算
   if (currentTime < startTime) {
