@@ -374,6 +374,50 @@ void FFMpegDecoder::videoDecodeLoop() {
         }
         int max_wait = frame_interval * 2;
 
+        // 倍速播放时使用跳帧策略
+        static int frameSkipCounter = 0;
+        if (speed > 1.0) {
+          // 计算跳帧间隔，速度越快跳帧越多
+          int skipInterval = static_cast<int>(speed);
+          if (frameSkipCounter++ % skipInterval != 0) {
+            // 跳过当前帧，但更新时钟
+            if (!hasAudio) {
+              static qint64 last_video_pts = 0;
+              static auto last_wall_clock = clock::now();
+              static float last_video_speed = 1.0f;
+
+              float speed = m_playbackSpeed.load();
+              bool speed_changed = fabs(speed - last_video_speed) > 0.1f;
+              if (speed_changed) {
+                last_video_pts = 0;
+                last_video_speed = speed;
+              }
+
+              if (last_video_pts == 0 || ms < last_video_pts || speed_changed) {
+                last_video_pts = ms;
+                last_wall_clock = clock::now();
+              } else {
+                qint64 pts_diff = ms - last_video_pts;
+                auto now = clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_wall_clock).count();
+
+                if (!m_stop && !m_seeking && !m_pause && elapsed < pts_diff / speed) {
+                  std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>((pts_diff / speed) - elapsed)));
+                }
+
+                if (!m_stop && !m_seeking) {
+                  last_video_pts = ms;
+                  last_wall_clock = clock::now();
+                }
+              }
+            }
+            av_frame_unref(frame.get());
+            continue;
+          }
+        } else {
+          frameSkipCounter = 0; // 正常速度时重置跳帧计数器
+        }
+
         if (hasAudio && audioClock > 0) {
           if (diff > frame_interval) {
             int waited = 0;
