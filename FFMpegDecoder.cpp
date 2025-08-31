@@ -93,8 +93,11 @@ void FFMpegDecoder::setAudioTrack(int index) {
   if (index < -1 || index >= static_cast<int>(m_audioStreamIndices.size()))
     return;
   if (m_audioTrackIndex != index) {
+    // 保存当前播放位置
+    qint64 currentPosition = m_audioClockMs.load();
     m_audioTrackIndex = index;
     m_seeking = true;
+    m_seekTarget = currentPosition; // 使用保存的位置作为seek目标
     m_videoSeekHandled = false;
     m_audioSeekHandled = false;
     m_eof = false;
@@ -120,14 +123,18 @@ void FFMpegDecoder::setVideoTrack(int index) {
   if (index < -1 || index >= static_cast<int>(m_videoStreamIndices.size()))
     return;
   if (m_videoTrackIndex != index) {
+    // 保存当前播放位置
+    qint64 currentPosition = m_audioClockMs.load();
     m_videoTrackIndex = index;
     if (index == -1) {
       m_seeking = true;
+      m_seekTarget = currentPosition; // 使用保存的位置作为seek目标
       m_videoSeekHandled = false;
       m_cond.notify_all();
       emit frameReady(QSharedPointer<QImage>());
     } else {
       m_seeking = true;
+      m_seekTarget = currentPosition; // 使用保存的位置作为seek目标
       m_videoSeekHandled = false;
       m_audioSeekHandled = false;
       m_eof = false;
