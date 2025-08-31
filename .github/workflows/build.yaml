@@ -41,10 +41,10 @@ jobs:
 
       - name: Strip debug symbols
         run: |
-          aarch64-dictpen-linux-gnu-strip NewPlayer
+          aarch64-dictpen-linux-gnu-strip VideoPlayer
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NewPlayer
-          path: NewPlayer
+          name: VideoPlayer
+          path: VideoPlayer
