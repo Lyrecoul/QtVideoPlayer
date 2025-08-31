@@ -2,6 +2,7 @@ QT       += core widgets gui multimedia
 
 CONFIG   += c++11
 TEMPLATE = app
+TARGET = VideoPlayer
 
 SOURCES += main.cpp \
            VideoPlayer.cpp \
