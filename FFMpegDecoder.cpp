@@ -80,8 +80,10 @@ void FFMpegDecoder::seek(qint64 ms) {
 
 void FFMpegDecoder::togglePause() {
   m_pause = !m_pause;
-  if (!m_pause)
+  if (!m_pause) {
+    // 从暂停状态恢复时，重置音频同步器以确保平滑播放
     m_cond.notify_all();
+  }
 }
 
 bool FFMpegDecoder::isPaused() const { return m_pause; }
@@ -594,16 +596,23 @@ bool FFMpegDecoder::initDecoder(int streamIndex, AVCodecContextPtr &actx,
   return resampler.init(actx.get());
 }
 
-bool FFMpegDecoder::handlePauseOrSeek() {
+bool FFMpegDecoder::handlePauseOrSeek(AVCodecContextPtr &actx) {
   if (m_pause) {
     std::unique_lock<std::mutex> lk(m_mutex);
     m_cond.wait(lk, [&] { return m_stop || !m_pause || m_seeking; });
+    // 从暂停恢复时，不需要额外处理，同步器会处理时间参考点
     return true;
   }
 
   if (m_seeking) {
     int64_t ts = m_seekTarget * (AV_TIME_BASE / 1000);
-    av_seek_frame(m_fmtCtx.get(), -1, ts, AVSEEK_FLAG_BACKWARD);
+    // 使用更精确的 seek 标志，提高 seek 准确性
+    av_seek_frame(m_fmtCtx.get(), -1, ts, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+    if (actx) {
+      avcodec_flush_buffers(actx.get());
+    }
+    // 立即更新音频时钟，避免等待下一帧
+    m_audioClockMs.store(m_seekTarget);
     m_audioSeekHandled = true;
     if (m_videoSeekHandled)
       m_seeking = false;
@@ -651,8 +660,11 @@ void FFMpegDecoder::audioDecodeLoop() {
   AVRational timeBase = {1, 1000};
 
   while (!m_stop) {
-    if (handlePauseOrSeek()) {
+    if (handlePauseOrSeek(actx)) {
       synchronizer.reset(m_playbackSpeed.load());
+      // seek 后清空当前帧，避免播放旧数据
+      av_frame_unref(frame.get());
+      av_packet_unref(pkt.get());
       continue;
     }
 

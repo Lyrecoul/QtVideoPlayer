@@ -50,6 +50,7 @@ public:
   void reset(double speed) {
     m_first = true;
     m_speed = speed;
+    m_skipSync = true; // 重置后跳过一次同步，避免不必要的延迟
   }
 
   void sync(int64_t ptsMs, double speed) {
@@ -64,17 +65,29 @@ public:
       return;
     }
 
+    // 如果是重置后的第一次同步，跳过同步计算，直接更新参考点
+    if (m_skipSync) {
+      m_refTime = std::chrono::steady_clock::now();
+      m_refPts = ptsMs;
+      m_skipSync = false;
+      return;
+    }
+
     int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - m_refTime)
                           .count();
     double diff = ((ptsMs - m_refPts) / speed) - elapsed;
-    if (diff > 10) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(int(diff * 0.8)));
+
+    // 减小同步阈值，避免过度等待导致卡顿
+    if (diff > 5) {
+      // 减少睡眠时间，避免卡顿
+      std::this_thread::sleep_for(std::chrono::milliseconds(int(diff * 0.5)));
     }
   }
 
 private:
   bool m_first = true;
+  bool m_skipSync = false;
   double m_speed = 1.0;
   int64_t m_refPts = 0;
   std::chrono::steady_clock::time_point m_refTime;
@@ -198,7 +211,7 @@ private:
   void scanAudioStreams(AVFormatContextPtr &m_fmtCtx);
   bool initDecoder(int streamIndex, AVCodecContextPtr &actx,
                    SwrBuffer &resampler, AVRational &timeBase);
-  bool handlePauseOrSeek();
+  bool handlePauseOrSeek(AVCodecContextPtr &actx);
   void emitSilence();
   void handleEOF();
   int getCurrentAudioStream();
